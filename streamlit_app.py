@@ -1,41 +1,71 @@
+
 import json
-import os
 import numpy as np
 import streamlit as st
 import tensorflow as tf
+
 from PIL import Image
+from huggingface_hub import hf_hub_download
+
+
+# =====================================================
+# 1. APPLICATION CONFIGURATION
+# =====================================================
 
 IMG_SIZE = (224, 224)
-MODELS_DIR = os.path.join(os.path.dirname(__file__), "..", "models")
+
+HF_REPO_ID = "kiddix/cassava_mazia_disease"
+
+st.set_page_config(
+    page_title="Cassava and Maize Disease Detector",
+    page_icon="🌿",
+    layout="centered"
+)
+
+
+# =====================================================
+# 2. DISEASE CLASS LABELS
+# =====================================================
 
 CASSAVA_LABELS = {
     "cbb": "Cassava Bacterial Blight",
     "cbsd": "Cassava Brown Streak Disease",
     "cgm": "Cassava Green Mite Damage",
     "cmd": "Cassava Mosaic Disease",
-    "healthy": "Healthy",
+    "healthy": "Healthy"
 }
 
 MAIZE_LABELS = {
     "Blight": "Northern Leaf Blight",
     "Common_Rust": "Common Rust",
     "Gray_Leaf_Spot": "Gray Leaf Spot",
-    "Healthy": "Healthy",
+    "Healthy": "Healthy"
 }
 
+
+# =====================================================
+# 3. DISPLAY DISEASE NAMES
+# =====================================================
+
 def get_display_name(crop, class_name):
-    mapping = CASSAVA_LABELS if crop == "cassava" else MAIZE_LABELS
+
+    if crop == "cassava":
+        mapping = CASSAVA_LABELS
+    else:
+        mapping = MAIZE_LABELS
+
     return mapping.get(class_name, class_name)
 
-st.set_page_config(page_title="Cassava/Maize Leaf Disease Detector", layout="centered")
-st.title("🌿 Cassava/Maize Leaf Disease Detector")
 
+# =====================================================
+# 4. LOAD MODELS FROM HUGGING FACE
+# =====================================================
 
-
-@st.cache_resource(show_spinner="Loading AI disease detection model...")
+@st.cache_resource(show_spinner=False)
 def load_model_and_classes(crop):
 
     model_filename = f"{crop}_model.keras"
+
     classes_filename = f"{crop}_classes.json"
 
     # Download trained model
@@ -52,23 +82,45 @@ def load_model_and_classes(crop):
         repo_type="model"
     )
 
-    # Load TensorFlow model
+    # Load trained TensorFlow model
     model = tf.keras.models.load_model(
         model_path,
         compile=False
     )
 
     # Load class names
-    with open(classes_path, "r", encoding="utf-8") as file:
+    with open(
+        classes_path,
+        "r",
+        encoding="utf-8"
+    ) as file:
+
         class_names = json.load(file)
 
     # Validate class names
     if not isinstance(class_names, list):
+
         raise ValueError(
-            f"{classes_filename} must contain a JSON list of class names."
+            f"{classes_filename} must contain a JSON list."
         )
 
-    if len(class_names) != model.output_shape[-1]:
+    if not all(isinstance(name, str) for name in class_names):
+
+        raise ValueError(
+            "Every class name must be a string."
+        )
+
+    # Validate model output
+    output_shape = model.output_shape
+
+    if isinstance(output_shape, list):
+
+        raise ValueError(
+            "This application expects a model with one output."
+        )
+
+    if output_shape[-1] != len(class_names):
+
         raise ValueError(
             "The number of class names does not match "
             "the model output classes."
@@ -76,37 +128,49 @@ def load_model_and_classes(crop):
 
     return model, class_names
 
-# ==========================================
-# APPLICATION INTERFACE
-# ==========================================
 
-st.title("🌿 Cassava/Maize Leaf Disease Detector")
+# =====================================================
+# 5. APPLICATION HEADER
+# =====================================================
+
+st.title("🌿 Cassava and Maize Leaf Disease Detector")
 
 st.markdown(
     """
+    Welcome to the Cassava and Maize Leaf Disease Detector.
+
     Upload an image of a cassava or maize leaf to identify
-    possible diseases using a trained artificial intelligence model.
+    possible diseases using artificial intelligence.
     """
 )
 
 st.divider()
 
-# Select crop
+
+# =====================================================
+# 6. CROP SELECTION
+# =====================================================
+
 crop = st.selectbox(
-    "Which crop is this leaf from?",
+    "Select the crop:",
     ["cassava", "maize"]
 )
 
-# ==========================================
-# LOAD SELECTED MODEL
-# ==========================================
+
+# =====================================================
+# 7. LOAD SELECTED MODEL
+# =====================================================
 
 try:
 
-    model, class_names = load_model_and_classes(crop)
+    with st.spinner(
+        f"Loading {crop} disease detection model..."
+    ):
+
+        model, class_names = load_model_and_classes(crop)
 
     st.success(
-        f"✅ {crop.capitalize()} disease detection model loaded successfully!"
+        f"✅ {crop.capitalize()} model loaded successfully!"
     )
 
 except Exception as error:
@@ -115,89 +179,130 @@ except Exception as error:
         f"Unable to load the {crop} disease detection model."
     )
 
-    with st.expander("View technical error details"):
+    with st.expander("Technical error details"):
+
         st.exception(error)
 
     st.stop()
 
 
-# ==========================================
-# IMAGE UPLOAD
-# ==========================================
+# =====================================================
+# 8. IMAGE UPLOAD
+# =====================================================
+
+st.subheader("📷 Upload Leaf Image")
 
 uploaded_file = st.file_uploader(
-    "Upload a leaf image",
+    "Choose a cassava or maize leaf image",
     type=["jpg", "jpeg", "png"]
 )
 
 
-# ==========================================
-# IMAGE PROCESSING AND PREDICTION
-# ==========================================
+# =====================================================
+# 9. IMAGE PROCESSING AND PREDICTION
+# =====================================================
 
 if uploaded_file is not None:
 
     try:
 
-        # Read uploaded image
-        pil_img = Image.open(uploaded_file).convert("RGB")
+        # Read image
+        pil_img = Image.open(
+            uploaded_file
+        ).convert("RGB")
 
+        # Display uploaded image
         st.image(
             pil_img,
-            caption="Uploaded leaf image",
+            caption="Uploaded Leaf Image",
             width="stretch"
         )
 
         # Resize image
         img_resized = pil_img.resize(IMG_SIZE)
 
-        # Convert image to NumPy array
-        img_array = np.array(img_resized).astype(np.float32)
+        # Convert to NumPy array
+        # Keep pixel values between 0 and 255
+        img_array = np.array(
+            img_resized
+        ).astype(np.float32)
 
-        # Create batch dimension
-        img_batch = np.expand_dims(img_array, axis=0)
+        # Add batch dimension
+        img_batch = np.expand_dims(
+            img_array,
+            axis=0
+        )
 
         # Generate prediction
         predictions = model.predict(
             img_batch,
             verbose=0
-        )[0]
+        )
+
+        predictions = np.asarray(predictions)
+
+        if predictions.ndim != 2 or predictions.shape[0] != 1:
+            raise ValueError(
+                "Unexpected prediction output shape."
+            )
+
+        predictions = predictions[0]
+
+        if len(predictions) != len(class_names):
+            raise ValueError(
+                "Prediction output does not match class names."
+            )
+
+        if not np.all(np.isfinite(predictions)):
+            raise ValueError(
+                "Model returned invalid prediction values."
+            )
 
         # Identify predicted class
-        pred_idx = int(np.argmax(predictions))
+        pred_idx = int(
+            np.argmax(predictions)
+        )
 
         pred_class = class_names[pred_idx]
 
-        confidence = float(predictions[pred_idx]) * 100
+        confidence = float(
+            predictions[pred_idx]
+        ) * 100
 
-        # ==================================
-        # DISPLAY RESULTS
-        # ==================================
+        # =================================================
+        # 10. DISPLAY PREDICTION RESULTS
+        # =================================================
 
         st.divider()
 
         st.subheader("🔍 Disease Detection Results")
 
+        disease_name = get_display_name(
+            crop,
+            pred_class
+        )
+
         st.markdown(
-            f"### Prediction: {get_display_name(crop, pred_class)}"
+            f"### Prediction: {disease_name}"
         )
 
         st.metric(
             label="Prediction Confidence",
-            value=f"{confidence:.1f}%"
+            value=f"{confidence:.2f}%"
         )
 
-        st.divider()
+        # =================================================
+        # 11. CLASS PROBABILITIES
+        # =================================================
 
-        # ==================================
-        # CLASS PROBABILITIES
-        # ==================================
+        st.divider()
 
         st.subheader("📊 Class Probabilities")
 
         sorted_predictions = sorted(
             zip(class_names, predictions),
-            key=lambda x: -x[1]
+            key=lambda item: float(item[1]),
+            reverse=True
         )
 
         for class_name, probability in sorted_predictions:
@@ -210,35 +315,62 @@ if uploaded_file is not None:
             percentage = float(probability) * 100
 
             st.write(
-                f"**{display_name}: {percentage:.1f}%**"
+                f"**{display_name}: {percentage:.2f}%**"
             )
 
             st.progress(
-                min(max(float(probability), 0.0), 1.0)
+                min(
+                    max(float(probability), 0.0),
+                    1.0
+                )
             )
+
+        # =================================================
+        # 12. ADDITIONAL INFORMATION
+        # =================================================
 
         st.divider()
 
+        if pred_class.lower() == "healthy":
+
+            st.success(
+                "The model classified this leaf as healthy."
+            )
+
+        else:
+
+            st.warning(
+                "A possible disease was detected. "
+                "Consider consulting an agricultural expert "
+                "for confirmation."
+            )
+
         st.caption(
-            "AI predictions are estimates and should be "
-            "confirmed by an agricultural expert when necessary."
+            "Note: AI predictions are estimates and should "
+            "not replace professional agricultural diagnosis."
         )
 
     except Exception as error:
 
-        st.error("An error occurred while processing the image.")
+        st.error(
+            "An error occurred while processing the uploaded image."
+        )
 
-        with st.expander("View technical error details"):
+        with st.expander("Technical error details"):
+
             st.exception(error)
 
 
-# ==========================================
-# FOOTER
-# ==========================================
+# =====================================================
+# 13. APPLICATION FOOTER
+# =====================================================
 
 st.divider()
 
 st.caption(
-    "Cassava/Maize Leaf Disease Detector | "
-    "Powered by TensorFlow and Streamlit"
+    "🌿 Cassava and Maize Leaf Disease Detector"
+)
+
+st.caption(
+    "Powered by TensorFlow, Hugging Face and Streamlit."
 )
