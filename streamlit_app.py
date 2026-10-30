@@ -75,3 +75,170 @@ def load_model_and_classes(crop):
         )
 
     return model, class_names
+
+# ==========================================
+# APPLICATION INTERFACE
+# ==========================================
+
+st.title("🌿 Cassava/Maize Leaf Disease Detector")
+
+st.markdown(
+    """
+    Upload an image of a cassava or maize leaf to identify
+    possible diseases using a trained artificial intelligence model.
+    """
+)
+
+st.divider()
+
+# Select crop
+crop = st.selectbox(
+    "Which crop is this leaf from?",
+    ["cassava", "maize"]
+)
+
+# ==========================================
+# LOAD SELECTED MODEL
+# ==========================================
+
+try:
+
+    model, class_names = load_model_and_classes(crop)
+
+    st.success(
+        f"✅ {crop.capitalize()} disease detection model loaded successfully!"
+    )
+
+except Exception as error:
+
+    st.error(
+        f"Unable to load the {crop} disease detection model."
+    )
+
+    with st.expander("View technical error details"):
+        st.exception(error)
+
+    st.stop()
+
+
+# ==========================================
+# IMAGE UPLOAD
+# ==========================================
+
+uploaded_file = st.file_uploader(
+    "Upload a leaf image",
+    type=["jpg", "jpeg", "png"]
+)
+
+
+# ==========================================
+# IMAGE PROCESSING AND PREDICTION
+# ==========================================
+
+if uploaded_file is not None:
+
+    try:
+
+        # Read uploaded image
+        pil_img = Image.open(uploaded_file).convert("RGB")
+
+        st.image(
+            pil_img,
+            caption="Uploaded leaf image",
+            width="stretch"
+        )
+
+        # Resize image
+        img_resized = pil_img.resize(IMG_SIZE)
+
+        # Convert image to NumPy array
+        img_array = np.array(img_resized).astype(np.float32)
+
+        # Create batch dimension
+        img_batch = np.expand_dims(img_array, axis=0)
+
+        # Generate prediction
+        predictions = model.predict(
+            img_batch,
+            verbose=0
+        )[0]
+
+        # Identify predicted class
+        pred_idx = int(np.argmax(predictions))
+
+        pred_class = class_names[pred_idx]
+
+        confidence = float(predictions[pred_idx]) * 100
+
+        # ==================================
+        # DISPLAY RESULTS
+        # ==================================
+
+        st.divider()
+
+        st.subheader("🔍 Disease Detection Results")
+
+        st.markdown(
+            f"### Prediction: {get_display_name(crop, pred_class)}"
+        )
+
+        st.metric(
+            label="Prediction Confidence",
+            value=f"{confidence:.1f}%"
+        )
+
+        st.divider()
+
+        # ==================================
+        # CLASS PROBABILITIES
+        # ==================================
+
+        st.subheader("📊 Class Probabilities")
+
+        sorted_predictions = sorted(
+            zip(class_names, predictions),
+            key=lambda x: -x[1]
+        )
+
+        for class_name, probability in sorted_predictions:
+
+            display_name = get_display_name(
+                crop,
+                class_name
+            )
+
+            percentage = float(probability) * 100
+
+            st.write(
+                f"**{display_name}: {percentage:.1f}%**"
+            )
+
+            st.progress(
+                min(max(float(probability), 0.0), 1.0)
+            )
+
+        st.divider()
+
+        st.caption(
+            "AI predictions are estimates and should be "
+            "confirmed by an agricultural expert when necessary."
+        )
+
+    except Exception as error:
+
+        st.error("An error occurred while processing the image.")
+
+        with st.expander("View technical error details"):
+            st.exception(error)
+
+
+# ==========================================
+# FOOTER
+# ==========================================
+
+st.divider()
+
+st.caption(
+    "Cassava/Maize Leaf Disease Detector | "
+    "Powered by TensorFlow and Streamlit"
+)
